@@ -1,0 +1,153 @@
+#!/usr/bin/python3
+
+'''
+LYTE DEPENDENCY TOOL
+******** Usage ********
+Lyte is a command line tool to handle dependency resolution and package installation.
+It stores a package manager command for each target, for example pip3 for Python 3
+or npm for Node.js. Then it just runs that command on each package the user has
+given. It reads packages from a Lytefile, similar to GNU Make or Docker. To use it,
+simply download the file and install it to somewhere in your PATH, then run:
+you@computer$ lyte setup
+This will create a .lyte/ directory in your home folder and set it up. Then in a project,
+create a Lytefile. For each thing you need to install, add a line to the file in the
+format:
+<target>: <package 1> <package 2> ... <package n>
+The available targets are python3, python2, debian, arch, and node. Once you have a
+Lytefile, simply run:
+you@computer$ lyte install
+This will install your packages.
+******** Options ********
+-f, --file:
+    Use a custom file instead of Lytefile.
+-d, --defaults:
+    Use a custom target file instead of the default, ~/.lyte/defaults.conf.
+    The defaults file has the same format as a Lytefile, for example:
+        python3: pip3 install
+        node: npm install
+-o, --output:
+    Do not suppress the output of the packager commands.
+-e, --error:
+    Supresses stderr for packager commands.
+******** Credits ********
+Lyte was written by Solomon Jackson.
+You can use, modify, sell, or do whatever you want with this software however you wish.
+It is totally free and open source.
+'''
+
+import argparse # Imports
+import sys
+import os
+from os.path import expanduser
+import subprocess
+
+print('Lyte Dependency Tool') # Print a friendly title
+
+NULL = open(os.devnull, 'wb') # Null file descriptor
+HOME = expanduser('~') # User's home directory
+DEFAULTS = [ # Defaul default settings
+    'python3: pip3 install\n',
+    'python2: pip install\n',
+    'debian: apt-get install -y\n',
+    'arch: pacman -S\n',
+    'node: npm install\n'
+]
+
+parser = argparse.ArgumentParser(sys.argv) # Argument parser
+parser.add_argument('-f', '--file', type=str, help='Path to a custom Lytefile.') # Options
+parser.add_argument('-d', '--defaults', type=str, help='Path to a custom default package manager configuration.')
+parser.add_argument('-o', '--output', action='store_true', help='Don\'t suppress output.')
+parser.add_argument('-e', '--error', action='store_true', help='Suppress errors.')
+parser.add_argument('command', type=str, help='The command to run.') # The command to run
+args = parser.parse_args() # Parse the arguments
+
+if args.command == 'setup': # Run the setup command
+    print(f'Setting up Lyte directory at {HOME}/.lyte/...')
+    try:
+        os.mkdir(HOME + '/.lyte/') # Create a .lyte/ directory
+    except FileExistsError:
+        print(f'Error: Lyte directory {HOME}/.lyte/ already exists!')
+        sys.exit(1)
+    print(f'Creating defaults file ...')
+    defaults = open(f'{HOME}/.lyte/defaults.conf', 'w') # Create defaults.conf
+    defaults.writelines(DEFAULTS) # Write the default defaults
+    defaults.close()
+    print('Done!')
+    print('Finished setting up!')
+
+if args.file:
+    path = args.file # If the user put in a Lytefile path, use that
+else:
+    path = 'Lytefile' # Otherwise, use that default
+try:
+    lytefile = open(path).read() # Read the Lytefile
+except FileNotFoundError:
+    print(f'Error: could not find Lytefile {path}.')
+    sys.exit(1)
+
+if args.defaults:
+    default_path = args.defaults # If the user put in a defaults path, use that
+else:
+    default_path = HOME + '/.lyte/defaults.conf' # Otherwise, use the default
+try:
+    defaults = open(default_path).read() # Read the defaults file
+except FileNotFoundError:
+    print(f'Error: could not read defaults file {default_path}, maybe run lyte setup?')
+    sys.exit(1)
+
+if args.command == 'install': # Run the install command
+    print('Reading defaults file...')
+    defaults = defaults.split('\n') # Read the defaults file
+    defaults = defaults[:-1]
+    cmds = {}
+    n = 0
+    for line in defaults: # Parse the lines
+        n += 1
+        if line.strip()[0] == '#': # Ignore comments
+            continue
+        line = line.split(':') # Otherwise, parse it normally
+        if len(line) < 2:
+            print(f'Syntax error in defaults file on line {n}.')
+            sys.exit(1)
+        name, cmd = line
+        cmd = cmd.split()
+        cmds[name] = cmd # Store the command
+    print('Done!')
+    print('Reading Lytefile...')
+    lytefile = lytefile.split('\n') # Read the Lytefile
+    lytefile = lytefile[:-1]
+    needs = {}
+    n = 0
+    for line in lytefile: # Parse the lines
+        n += 1
+        if line.strip()[0] == '#': # Again, ignore comments
+            continue
+        line = line.split(':') # Parse this line
+        if len(line) < 2:
+            print(f'Syntax error in Lytefile on line {n}.')
+            sys.exit(1)
+        name, pkgs = line
+        pkgs = pkgs.split()
+        needs[name] = pkgs # Store the packages
+    print('Done!')
+    print('Installing packages...')
+    for need in needs: # Install each package
+        print(f'Installing packages for target {need}...')
+        try:
+            man = cmds[need] # Get the command for this target
+        except KeyError:
+            print(f'Error: no such target {need}.')
+            sys.exit(1)
+        print(f'Using package manager {man[0]}.')
+        for pkg in needs[need]:
+            cmd = man.copy()
+            cmd.append(pkg) # Generate a command
+            print(' '.join(cmd))
+            kw = {}
+            if not args.output: # Allow suppression of output and error streams
+                kw['stdout'] = NULL
+            if args.error:
+                kw['stderr'] = NULL
+            p = subprocess.call(cmd, **kw) # Run the command
+        print('Done!')
+    print('Done!')
